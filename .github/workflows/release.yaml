@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release-binaries:
+    runs-on: ubuntu-latest
+    name: Compile & upload the release binaries
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+    - id: program_version
+      uses: orbit-online/program-version@v1
+    - name: Build watch-signal
+      run: |
+        mkdir -p release/github.com/orbit-online/
+        for arch in amd64 arm64 386; do
+          GOOS=linux GOARCH=$arch go build --ldflags="-X main.VERSION=${{ steps.program_version.outputs.version }}" -o release/github.com/orbit-online/watch-signal-linux-${arch}
+        done
+        for arch in amd64 arm64; do
+          GOOS=darwin GOARCH=$arch go build --ldflags="-X main.VERSION=${{ steps.program_version.outputs.version }}" -o release/github.com/orbit-online/watch-signal-darwin-${arch}
+        done
+    - id: release
+      uses: orbit-online/git-release@v1
+    - uses: ncipollo/release-action@v1
+      with:
+        name: ${{ steps.program_version.outputs.version }}
+        body: ${{ steps.release.outputs.message }}
+        draft: false
+        prerelease: false
+        artifacts: release/github.com/orbit-online/*
+        artifactErrorsFailBuild: true
+        artifactContentType: application/octet-stream
+
+  release-image:
+    runs-on: ubuntu-latest
+    name: Build & push the container image
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+    - name: Set up buildx
+      uses: docker/setup-buildx-action@v3
+    - name: Login to ghcr
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Compute metadata
+      id: meta
+      uses: docker/metadata-action@v4
+      with:
+        images: ghcr.io/orbit-online/watch-signal
+        tags: type=semver,pattern={{version}}
+    - name: Build and push Docker image
+      id: push
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: Dockerfile
+        platforms: linux/amd64,linux/arm64
+        provenance: false
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: |
+          org.opencontainers.image.description="Signal a process when paths change"
