@@ -104,7 +104,7 @@ func startWatchSignal(params Params) error {
 				break
 			}
 			proc := os.Process{Pid: pid}
-			slog.Debug("Signalling", "signal", params.Signal, "pid", pid)
+			slog.Info("Signalling", "signal", params.Signal, "pid", pid)
 			proc.Signal(signal)
 		case err, ok := <-watcher.Errors:
 			if !ok {
