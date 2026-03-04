@@ -85,8 +85,8 @@ func startWatchSignal(params Params) error {
 			return fmt.Errorf("failed to watch path %s: %w", path, err)
 		}
 	}
+	slog.Info("Startup completed")
 	for {
-		slog.Info("Startup completed")
 		select {
 		case event, ok := <-watcher.Events:
 			if !ok {
