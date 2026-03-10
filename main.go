@@ -7,16 +7,18 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/alecthomas/kong"
 	"github.com/fsnotify/fsnotify"
 )
 
 type Params struct {
-	Signal  string   `required:"" arg:"" name:"signal" help:"The POSIX signal to send when a watched path changes (without the \"SIG\" prefix)" enum:"HUP,INT,QUIT,ILL,TRAP,ABRT,IOT,BUS,FPE,KILL,USR1,SEGV,USR2,PIPE,ALRM,TERM,CHLD,CONT,STOP,TSTP,TTIN,TTOU,URG,XCPU,XFSZ,VTALRM,WINCH,PROF,IO,SYS"`
-	PidFile string   `required:"" arg:"" name:"pidfile" help:"Path to the file containing the PID to send the signal to"`
-	Paths   []string `required:"" arg:"" name:"paths" help:"Filesystem paths to watch for changes"`
-	Verbose bool     `help:"Turn on verbose logging"`
+	Signal   string        `required:"" arg:"" help:"The POSIX signal to send when a watched path changes (without the \"SIG\" prefix)" enum:"HUP,INT,QUIT,ILL,TRAP,ABRT,IOT,BUS,FPE,KILL,USR1,SEGV,USR2,PIPE,ALRM,TERM,CHLD,CONT,STOP,TSTP,TTIN,TTOU,URG,XCPU,XFSZ,VTALRM,WINCH,PROF,IO,SYS"`
+	PidFile  string        `required:"" arg:"" help:"Path to the file containing the PID to send the signal to"`
+	Paths    []string      `required:"" arg:"" help:"Filesystem paths to watch for changes"`
+	Debounce time.Duration `help:"How long to wait after a change to send the signal" default:"5s"`
+	Verbose  bool          `help:"Turn on verbose logging"`
 }
 
 var params Params
@@ -85,7 +87,28 @@ func startWatchSignal(params Params) error {
 			return fmt.Errorf("failed to watch path %s: %w", path, err)
 		}
 	}
+
+	sendSignal := func() {
+		pidStr, err := os.ReadFile(params.PidFile)
+		if err != nil {
+			slog.Warn("Failed to read pidfile", "pidfile", params.PidFile, "err", err)
+			return
+		}
+		pid, err := strconv.Atoi(strings.Trim(string(pidStr), " \n\t\r"))
+		if err != nil {
+			slog.Warn("Unable to parse pid as an integer", "pid", pidStr, "pidfile", params.PidFile, "err", err)
+			return
+		}
+		proc := os.Process{Pid: pid}
+		slog.Info("Signalling", "signal", params.Signal, "pid", pid)
+		proc.Signal(signal)
+	}
+
 	slog.Info("Startup completed")
+
+	var debounceTimer *time.Timer
+	timerIsSet := false
+
 	for {
 		select {
 		case event, ok := <-watcher.Events:
@@ -93,19 +116,17 @@ func startWatchSignal(params Params) error {
 				return fmt.Errorf("Watcher was closed")
 			}
 			slog.Debug("File changed", "path", event.Name)
-			pidStr, err := os.ReadFile(params.PidFile)
-			if err != nil {
-				slog.Warn("Failed to read pidfile", "pidfile", params.PidFile, "err", err)
-				break
+			if !timerIsSet {
+				if debounceTimer == nil {
+					debounceTimer = time.AfterFunc(params.Debounce, func() {
+						timerIsSet = false
+						sendSignal()
+					})
+				} else {
+					debounceTimer.Reset(params.Debounce)
+				}
+				timerIsSet = true
 			}
-			pid, err := strconv.Atoi(strings.Trim(string(pidStr), " \n\t\r"))
-			if err != nil {
-				slog.Warn("Unable to parse pid as an integer", "pid", pidStr, "pidfile", params.PidFile, "err", err)
-				break
-			}
-			proc := os.Process{Pid: pid}
-			slog.Info("Signalling", "signal", params.Signal, "pid", pid)
-			proc.Signal(signal)
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return fmt.Errorf("Watcher was closed")
