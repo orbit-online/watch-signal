@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Compile & upload the release binaries
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: actions/setup-go@v5
       with:
         go-version-file: go.mod
@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Build & push the container image
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
     - name: Set up buildx
